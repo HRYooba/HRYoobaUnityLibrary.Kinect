@@ -5,82 +5,67 @@ namespace HRYooba.Kinect
     [RequireComponent(typeof(Animator))]
     public class FootPlacer : MonoBehaviour
     {
-        private const float MaxFootDistanceGround = 0.02f;  // maximum distance from lower foot to the ground
-        private const float MaxFootDistanceTime = 0.2f; // 1.0f;  // maximum allowed time, the lower foot to be distant from the ground
+        [Header("Settings")]
+        [SerializeField]
+        [Tooltip("地面のY座標からのオフセット。足を少し浮かせたり、めり込ませたりする場合に調整します。")]
+        private float _offsetY = 0.05f;
 
-        [SerializeField] private float _smoothFactor = 10f;
+        [SerializeField]
+        [Tooltip("地面とみなすY座標。")]
+        private float _groundY = 0.0f;
 
+        private Animator _animator;
         private Transform _leftFoot;
         private Transform _rightFoot;
-        private Vector3 _leftFootInitPos;
-        private Vector3 _rightFootInitPos;
-        private Vector3 _initialUpVector;
-
-        private Vector3 _footCorrection = Vector3.zero;
-        private float _footDistance = 0f;
-        private float _footDistanceTime = 0f;
 
         private void Awake()
         {
-            var animator = GetComponent<Animator>();
-
-            _initialUpVector = transform.up;
-            _leftFoot = animator.GetBoneTransform(HumanBodyBones.LeftToes);
-            _rightFoot = animator.GetBoneTransform(HumanBodyBones.RightToes);
-            _leftFootInitPos = _leftFoot ? _leftFoot.position : Vector3.zero;
-            _rightFootInitPos = _rightFoot ? _rightFoot.position : Vector3.zero;
-        }
-
-        private void Update()
-        {
-            var targetPos = Vector3.zero;
-            var newDistance = GetCorrDistanceToGround();
-            var newDistanceTime = Time.time;
-
-            if (Mathf.Abs(newDistance) >= MaxFootDistanceGround && Mathf.Abs(_footDistance + newDistance) < 1f)  // limit the correction to 1 meter
+            _animator = GetComponent<Animator>();
+            if (_animator == null)
             {
-                if ((newDistanceTime - _footDistanceTime) >= MaxFootDistanceTime)
-                {
-                    _footDistance += newDistance;
-                    _footDistanceTime = newDistanceTime;
-
-                    _footCorrection = _initialUpVector * _footDistance;
-                }
-            }
-            else
-            {
-                _footDistanceTime = newDistanceTime;
+                Debug.LogError("Animator component not found on this GameObject.", this);
+                return;
             }
 
-            targetPos += _footCorrection;
+            // 各ボーンのTransformを取得
+            _leftFoot = _animator.GetBoneTransform(HumanBodyBones.LeftFoot);
+            _rightFoot = _animator.GetBoneTransform(HumanBodyBones.RightFoot);
 
-            transform.position = Vector3.Lerp(transform.position, targetPos, _smoothFactor * Time.deltaTime);
-        }
-
-        private float GetCorrDistanceToGround(Transform targetTransform, Vector3 initialPos)
-        {
-            Vector3 deltaDir = targetTransform.position - initialPos;
-            Vector3 vTrans = new Vector3(deltaDir.x * _initialUpVector.x, deltaDir.y * _initialUpVector.y, deltaDir.z * _initialUpVector.z);
-
-            float fSign = Vector3.Dot(deltaDir, _initialUpVector) < 0f ? 1f : -1f;  // change the sign, because it's a correction
-            float deltaDist = fSign * vTrans.magnitude;
-
-            return deltaDist;
-        }
-
-        private float GetCorrDistanceToGround()
-        {
-            float fDistMin = 1000f;
-            float fDistLeft = _leftFoot ? GetCorrDistanceToGround(_leftFoot, _leftFootInitPos) : fDistMin;
-            float fDistRight = _rightFoot ? GetCorrDistanceToGround(_rightFoot, _rightFootInitPos) : fDistMin;
-            fDistMin = Mathf.Abs(fDistLeft) < Mathf.Abs(fDistRight) ? fDistLeft : fDistRight;
-
-            if (fDistMin == 1000f)
+            if (_leftFoot == null || _rightFoot == null)
             {
-                fDistMin = 0f;
+                Debug.LogError("Could not find foot bones. Make sure the model is a configured Humanoid.", this);
+            }
+        }
+
+        // LateUpdateは、すべてのUpdate関数の呼び出し後にフレームごとに呼び出されます。
+        // アニメーションの更新はこの間に行われるため、アニメーション適用後の最終的なボーン位置を取得するのに適しています。
+        private void LateUpdate()
+        {
+            // 足のボーンが取得できていなければ何もしない
+            if (_leftFoot == null || _rightFoot == null)
+            {
+                return;
             }
 
-            return fDistMin;
+            // 1. 左右の足のワールド座標におけるY座標を取得
+            float leftFootY = _leftFoot.position.y;
+            float rightFootY = _rightFoot.position.y;
+
+            // 2. より低い（地面に近い）方の足のY座標を特定
+            float lowestFootY = Mathf.Min(leftFootY, rightFootY);
+
+            // 3. 目標とするY座標を計算（地面のY座標 + オフセット）
+            float targetY = _groundY + _offsetY;
+
+            // 4. 移動が必要な差分を計算
+            //    (目標のY座標) - (現在の最も低い足のY座標)
+            float deltaY = targetY - lowestFootY;
+
+            // 5. キャラクターのルートtransformのY座標に差分を加算して移動させる
+            //    これにより、キャラクター全体が上下に移動し、足が地面に接地します。
+            Vector3 newPosition = transform.position;
+            newPosition.y += deltaY;
+            transform.position = newPosition;
         }
     }
 }
